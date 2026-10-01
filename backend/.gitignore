@@ -1,2 +1,8 @@
 .env
+*/__pycache__/
+*/routers/__pycache__/
+*__init__.py
 /__pycache__/
+
+# db files
+*.sqlite3
