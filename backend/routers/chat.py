@@ -24,10 +24,10 @@ class ChatRequest(BaseModel):
         example="What is the main conclusion of this document?"
     )
     n_results: Optional[int] = Field(
-        default=4,
-        description="Kitne context chunks retrieve karne hain (1-8)",
-        ge=1,    # greater than or equal to 1
-        le=8     # less than or equal to 8
+        default=6,
+        description="Kitne context chunks retrieve karne hain (1-10)",
+        ge=1,
+        le=10
     )
     # Field() Pydantic ka tool hai jisse:
     # - Validation rules add kar sakte hain (min_length, ge, le)

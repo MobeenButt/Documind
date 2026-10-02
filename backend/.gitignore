@@ -6,3 +6,6 @@
 
 # db files
 *.sqlite3
+
+# bin or cache files
+*.bin
