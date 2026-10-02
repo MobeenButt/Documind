@@ -104,6 +104,9 @@ async def ingest_pdf(request: IngestRequest):
         "doc_id": doc_id,
         "pages_processed": len(pages_data),
         "total_chunks": result["total_chunks"],
+        "doc_type_detected": result["doc_type"],
+        "chunk_size_used": result["chunk_size_used"],
+        "document_stats": result["stats"],
         "message": result["message"],
         "next_step": f"Ab /chat/ endpoint use karo doc_id='{doc_id}' ke saath"
     }
