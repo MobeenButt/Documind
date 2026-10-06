@@ -33,7 +33,8 @@ export default function Navbar() {
       }}
     >
       {/* Logo */}
-      <motion.button
+   
+    <motion.button
         onClick={() => !isHome && navigate('/')}
         style={{
           display: 'flex',
@@ -47,6 +48,8 @@ export default function Navbar() {
         whileHover={!isHome ? { scale: 1.03 } : {}}
         whileTap={!isHome ? { scale: 0.97 } : {}}
       >
+        */
+  
         {/* Icon with glow */}
         <div
           style={{
