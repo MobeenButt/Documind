@@ -4,132 +4,93 @@ from typing import List, Optional
 
 from services.vector_service import query_document, document_exists
 from services.llm_service import generate_answer
+from services.supabase_service import insert_chat_message, get_chat_history
 
-# ─── Router Setup ─────────────────────────────────────────────────────────────
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
-# ─── Request Schema ───────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
-    doc_id: str = Field(
-        ...,
-        description="Document ka unique ID — upload response se milta hai",
-        example="550e8400-e29b-41d4-a716-446655440000"
-    )
-    question: str = Field(
-        ...,
-        description="User ka natural language question",
-        min_length=3,        # 1-2 character questions useless hain
-        max_length=500,      # Bahut lamba question bhi context confuse karta hai
-        example="What is the main conclusion of this document?"
-    )
-    n_results: Optional[int] = Field(
-        default=6,
-        description="Kitne context chunks retrieve karne hain (1-10)",
-        ge=1,
-        le=10
-    )
-    # Field() Pydantic ka tool hai jisse:
-    # - Validation rules add kar sakte hain (min_length, ge, le)
-    # - Swagger docs mein description aur example dikh sakti hai
-    # - Default values set kar sakte hain
+    doc_id:    str
+    question:  str   = Field(..., min_length=3, max_length=500)
+    n_results: Optional[int] = Field(default=6, ge=1, le=10)
 
 
-# ─── Response Schema ──────────────────────────────────────────────────────────
-# Response ka bhi schema define karo — Swagger docs mein clearly dikhega
-# aur frontend developer ko pata rahega kya expect karna hai
 class ChunkInfo(BaseModel):
-    text: str
-    page_number: int
+    text:             str
+    page_number:      int
     similarity_score: float
 
 
 class ChatResponse(BaseModel):
-    success: bool
-    answer: str
-    citations: List[int]           # Page numbers jo answer mein cite hue
-    chunks_used: int
-    model: str
-    relevant_chunks: List[ChunkInfo]  # Transparency ke liye raw chunks bhi
+    success:         bool
+    answer:          str
+    citations:       List[int]
+    chunks_used:     int
+    model:           str
+    relevant_chunks: List[ChunkInfo]
 
 
-# ─── Chat Endpoint ────────────────────────────────────────────────────────────
 @router.post("/", response_model=ChatResponse)
 async def chat_with_document(request: ChatRequest):
     """
-    Document ke saath chat karo.
-
-    Complete RAG Pipeline:
-    1. ChromaDB mein question se similar chunks dhundo
-    2. Chunks ko context mein format karo
-    3. Groq LLM se answer generate karo
-    4. Answer + citations return karo
-
-    Prerequisites:
-    - PDF /upload/ pe upload hona chahiye
-    - /ingest/ pe process hona chahiye
+    Full RAG pipeline:
+    1. pgvector se relevant chunks retrieve karo
+    2. Groq LLM se answer generate karo
+    3. User + assistant messages Supabase mein save karo
     """
-
-    doc_id = request.doc_id
+    doc_id   = request.doc_id
     question = request.question.strip()
 
-    # ── Step 1: Document Ready Hai? ───────────────────────────────────────────
-    # Chat se pehle verify karo document ChromaDB mein hai
-    # Agar nahi hai toh meaningful error do — "500 internal error" nahi
+    # ── Document check ────────────────────────────────────────────────────────
     if not document_exists(doc_id):
         raise HTTPException(
             status_code=404,
-            detail=(
-                f"Document '{doc_id}' ChromaDB mein nahi mila. "
-                "Pehle /upload/ aur /ingest/ call karein."
-            )
+            detail=f"Document '{doc_id}' nahi mila. Pehle upload aur ingest karein."
         )
 
-    # ── Step 2: Relevant Chunks Retrieve Karo ────────────────────────────────
-    # vector_service.query_document() kaam karta hai:
-    #   question → embed → cosine similarity search → top n chunks
+    # ── Retrieve relevant chunks ──────────────────────────────────────────────
     try:
-        relevant_chunks = query_document(
-            doc_id=doc_id,
-            question=question,
-            n_results=request.n_results
-        )
+        relevant_chunks = query_document(doc_id, question, request.n_results)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Document search mein error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Search error: {str(e)}")
 
-    # Agar koi relevant chunk nahi mila (empty collection edge case)
     if not relevant_chunks:
         raise HTTPException(
             status_code=404,
-            detail="Document mein koi relevant content nahi mila is question ke liye."
+            detail="Relevant content nahi mila is question ke liye."
         )
 
-    # ── Step 3: LLM Se Answer Generate Karo ──────────────────────────────────
-    # llm_service.generate_answer() kaam karta hai:
-    #   chunks format karo → system prompt + human message → ChatGroq → answer
+    # ── Generate answer ───────────────────────────────────────────────────────
     try:
-        llm_response = generate_answer(
-            question=question,
-            relevant_chunks=relevant_chunks
+        llm_response = generate_answer(question, relevant_chunks)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM error: {str(e)}")
+
+    # ── Save both messages to Supabase ────────────────────────────────────────
+    # User message
+    try:
+        insert_chat_message(doc_id=doc_id, role="user", content=question)
+    except Exception as e:
+        print(f"Warning: user message save failed: {e}")
+
+    # Assistant message with citations
+    try:
+        insert_chat_message(
+            doc_id=doc_id,
+            role="assistant",
+            content=llm_response["answer"],
+            citations=llm_response["citations"],
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=502,   # 502 = Bad Gateway — upstream service (Groq) ne error diya
-            detail=f"LLM answer generate karne mein error: {str(e)}"
-        )
+        print(f"Warning: assistant message save failed: {e}")
 
-    # ── Step 4: Response Format Karo ─────────────────────────────────────────
-    # ChunkInfo objects banao response schema ke liye
     chunks_info = [
         ChunkInfo(
-            text=chunk["text"],
-            page_number=chunk.get("page_number", 0),
-            similarity_score=chunk.get("similarity_score", 0.0)
+            text=c["text"],
+            page_number=c.get("page_number", 0),
+            similarity_score=c.get("similarity_score", 0.0),
         )
-        for chunk in relevant_chunks
+        for c in relevant_chunks
     ]
 
     return ChatResponse(
@@ -138,49 +99,23 @@ async def chat_with_document(request: ChatRequest):
         citations=llm_response["citations"],
         chunks_used=llm_response["chunks_used"],
         model=llm_response["model"],
-        relevant_chunks=chunks_info
+        relevant_chunks=chunks_info,
     )
 
 
-# ─── Quick Question (Simpler Interface) ──────────────────────────────────────
-# Kabhi kabhi frontend ko simple GET request se quick answer chahiye hota hai
-# Yeh optional convenience endpoint hai — same logic, query params se kaam karta hai
-@router.get("/quick")
-async def quick_chat(doc_id: str, question: str):
+@router.get("/history/{doc_id}")
+async def get_document_chat_history(doc_id: str):
     """
-    GET request se quick question poochho.
-
-    Usage: GET /chat/quick?doc_id=abc-123&question=What+is+this+about
-
-    POST /chat/ se fark: yeh simplified response deta hai,
-    raw chunks include nahi karta.
+    Document ki poori chat history return karo.
+    Frontend ChatPage load hone pe yeh call karta hai.
     """
+    try:
+        messages = get_chat_history(doc_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"History fetch error: {str(e)}")
 
-    if not document_exists(doc_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Document '{doc_id}' nahi mila. Pehle upload aur ingest karein."
-        )
-
-    relevant_chunks = query_document(
-        doc_id=doc_id,
-        question=question.strip(),
-        n_results=4
-    )
-
-    if not relevant_chunks:
-        return {
-            "answer": "Is question ka jawab document mein nahi mila.",
-            "citations": []
-        }
-
-    llm_response = generate_answer(
-        question=question.strip(),
-        relevant_chunks=relevant_chunks
-    )
-
-    # Simplified response — sirf answer aur citations
     return {
-        "answer": llm_response["answer"],
-        "citations": llm_response["citations"]
+        "doc_id":   doc_id,
+        "messages": messages,
+        "count":    len(messages),
     }
