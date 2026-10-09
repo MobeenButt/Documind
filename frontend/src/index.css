@@ -242,19 +242,12 @@ code, pre, kbd {
   color: white;
 }
 
-/* ── Utility: Gradient Text ─────────────────────────────────────────────────── */
+/* ── Utility: Gradient Text — static, no animation ──────────────────────────── */
 .gradient-text {
-  background: linear-gradient(135deg, #a78bfa, #38bdf8, #a78bfa);
-  background-size: 200% auto;
+  background: linear-gradient(135deg, #a78bfa, #38bdf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: gradient-shift 4s linear infinite;
-}
-
-@keyframes gradient-shift {
-  0%   { background-position: 0% center; }
-  100% { background-position: 200% center; }
 }
 
 /* ── Utility: Shimmer Loading ───────────────────────────────────────────────── */

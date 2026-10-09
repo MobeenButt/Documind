@@ -406,7 +406,12 @@ export default function UploadPage() {
               color:         'var(--text-primary)',
             }}>
               Chat with any{' '}
-              <span className="gradient-text">document</span>
+              <span style={{
+                background: 'linear-gradient(135deg, #a78bfa, #38bdf8)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}>document</span>
             </h1>
 
             <p style={{ fontSize: '1rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
@@ -458,12 +463,8 @@ export default function UploadPage() {
                     </motion.div>
                   ) : (
                     <motion.div key="idle"
-                      animate={isDragActive
-                        ? { scale: 1.15 }
-                        : { scale: [1, 1.04, 1] }}
-                      transition={isDragActive
-                        ? { duration: 0.3 }
-                        : { duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                      animate={isDragActive ? { scale: 1.15 } : { scale: 1 }}
+                      transition={{ duration: 0.3 }}
                       style={{
                         width: 60, height: 60, borderRadius: 18,
                         background:  isDragActive ? 'linear-gradient(135deg, rgba(124,107,255,0.3), rgba(56,189,248,0.25))' : 'rgba(255,255,255,0.05)',

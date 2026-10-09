@@ -3,13 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Send, FileText, ChevronLeft, Sparkles,
-  User, Copy, Check, Trash2, Clock,
+  User, Copy, Check, Clock, AlertTriangle,
 } from 'lucide-react'
 import AuroraBackground from '../components/AuroraBackground'
 import LoadingSpinner from '../components/LoadingSpinner'
 import CitationBadge from '../components/CitationBadge'
 import Navbar from '../components/Navbar'
-import { sendMessage, getChatHistory, deleteDocument } from '../services/api'
+import { sendMessage, getChatHistory, checkIngestStatus } from '../services/api'
 
 export default function ChatPage() {
   const location = useLocation()
@@ -24,6 +24,7 @@ export default function ChatPage() {
   const [copiedId, setCopiedId]       = useState(null)
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [historyError, setHistoryError]     = useState(false)
+  const [notIngested, setNotIngested]       = useState(false)
 
   const bottomRef   = useRef(null)
   const inputRef    = useRef(null)
@@ -40,6 +41,14 @@ export default function ChatPage() {
     async function loadHistory() {
       setLoadingHistory(true)
       try {
+        // Check if document is ingested in pgvector
+        const status = await checkIngestStatus(doc_id)
+        if (!status.ingested_in_pgvector) {
+          setNotIngested(true)
+          setLoadingHistory(false)
+          return
+        }
+
         const res = await getChatHistory(doc_id)
         // Map Supabase rows to local message shape
         const loaded = (res.messages || []).map(row => ({
@@ -230,6 +239,51 @@ export default function ChatPage() {
             {/* Messages */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 12px', display: 'flex', flexDirection: 'column', gap: 18 }}>
 
+              {/* Not ingested warning */}
+              {notIngested && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', textAlign: 'center', padding: '60px 24px', flex: 1,
+                  }}
+                >
+                  <div style={{
+                    width: 56, height: 56, borderRadius: 16, marginBottom: 18,
+                    background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.25)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <AlertTriangle size={24} color="#fbbf24" strokeWidth={1.5} />
+                  </div>
+                  <p style={{
+                    fontFamily: 'var(--font-display)', fontWeight: 600,
+                    fontSize: '1rem', color: 'var(--text-primary)', marginBottom: 8,
+                  }}>
+                    Document not processed yet
+                  </p>
+                  <p style={{
+                    fontSize: '0.83rem', color: 'var(--text-secondary)',
+                    lineHeight: 1.6, maxWidth: 320, marginBottom: 20,
+                  }}>
+                    This document exists in history but hasn't been ingested into the vector database.
+                    You need to re-upload and process it before chatting.
+                  </p>
+                  <button
+                    onClick={() => navigate('/')}
+                    style={{
+                      padding: '11px 24px', borderRadius: 12,
+                      background: 'linear-gradient(135deg, var(--accent), #5b4fcf)',
+                      border: 'none', color: 'white',
+                      fontFamily: 'var(--font-display)', fontWeight: 600,
+                      fontSize: '0.88rem', cursor: 'pointer',
+                    }}
+                  >
+                    Upload again
+                  </button>
+                </motion.div>
+              )}
+
               {/* History loading */}
               {loadingHistory && (
                 <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
@@ -249,8 +303,6 @@ export default function ChatPage() {
                   style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '60px 20px' }}
                 >
                   <motion.div
-                    animate={{ y: [0, -8, 0] }}
-                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
                     style={{ width: 60, height: 60, borderRadius: 18, marginBottom: 18, background: 'rgba(124,107,255,0.1)', border: '1px solid rgba(124,107,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   >
                     <Sparkles size={26} color="#a78bfa" strokeWidth={1.5} />
@@ -316,8 +368,9 @@ export default function ChatPage() {
                     value={input}
                     onChange={e => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Ask anything about this document..."
+                    placeholder={notIngested ? "Document not processed — upload again" : "Ask anything about this document..."}
                     rows={1}
+                    disabled={notIngested}
                     style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text-primary)', fontFamily: 'var(--font-body)', fontSize: '0.9rem', lineHeight: 1.5, resize: 'none', maxHeight: 120, overflowY: 'auto' }}
                     onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
                   />
