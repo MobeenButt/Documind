@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from services.supabase_service import (
     get_all_documents,
     get_document_by_id,
@@ -7,70 +7,72 @@ from services.supabase_service import (
     delete_chat_history,
 )
 from services.vector_service import delete_document
+from services.auth_service import get_user_id
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 
 @router.get("/")
-async def list_documents():
-    """
-    Saare documents list karo — latest pehle.
-    UploadPage history sidebar ke liye use hoga.
-    """
+async def list_documents(
+    user_id: str = Depends(get_user_id),
+):
+    """Sirf is user ke documents list karo."""
     try:
-        docs = get_all_documents()
+        docs = get_all_documents(user_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Documents fetch error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fetch error: {str(e)}")
 
-    return {
-        "documents": docs,
-        "count":     len(docs),
-    }
+    return {"documents": docs, "count": len(docs)}
 
 
 @router.get("/{doc_id}")
-async def get_document(doc_id: str):
-    """Single document ki detail lo."""
-    doc = get_document_by_id(doc_id)
+async def get_document(
+    doc_id: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Single document — ownership verify karke."""
+    doc = get_document_by_id(doc_id, user_id)
     if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' nahi mila.")
+        raise HTTPException(
+            status_code=404,
+            detail="Document nahi mila ya aapka nahi hai."
+        )
     return doc
 
 
 @router.delete("/{doc_id}")
-async def delete_document_completely(doc_id: str):
+async def delete_document_completely(
+    doc_id: str,
+    user_id: str = Depends(get_user_id),
+):
     """
-    Document completely delete karo:
-    1. pgvector embeddings
-    2. Supabase Storage PDF
-    3. Chat history (CASCADE se auto hota hai lekin explicit bhi karo)
-    4. DB record
+    Document completely delete karo.
+    Sirf owner delete kar sakta hai.
     """
-    doc = get_document_by_id(doc_id)
+    doc = get_document_by_id(doc_id, user_id)
     if not doc:
-        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' nahi mila.")
+        raise HTTPException(
+            status_code=404,
+            detail="Document nahi mila ya aapka nahi hai."
+        )
 
     errors = []
 
-    # pgvector embeddings
     if not delete_document(doc_id):
         errors.append("embeddings delete failed")
 
-    # Storage PDF
     if doc.get("storage_path"):
         if not delete_pdf_from_storage(doc["storage_path"]):
             errors.append("storage delete failed")
 
-    # Chat history
-    delete_chat_history(doc_id)
+    delete_chat_history(doc_id, user_id)
 
-    # DB record (CASCADE handles embeddings + chat too)
-    if not delete_document_record(doc_id):
+    if not delete_document_record(doc_id, user_id):
         errors.append("db record delete failed")
 
     return {
         "success": len(errors) == 0,
         "doc_id":  doc_id,
         "errors":  errors,
-        "message": "Document deleted." if not errors else f"Partial delete. Errors: {errors}"
+        "message": "Deleted." if not errors else f"Partial. Errors: {errors}",
     }

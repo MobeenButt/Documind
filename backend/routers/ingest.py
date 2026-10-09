@@ -1,11 +1,12 @@
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from services.pdf_service import extract_text_from_pdf
 from services.vector_service import ingest_document, document_exists
 from services.supabase_service import update_document_after_ingest, get_document_by_id
+from services.auth_service import get_user_id
 
 router = APIRouter(prefix="/ingest", tags=["Ingest"])
 
@@ -19,31 +20,40 @@ class IngestRequest(BaseModel):
 
 
 @router.post("/")
-async def ingest_pdf(request: IngestRequest):
+async def ingest_pdf(
+    request: IngestRequest,
+    user_id: str = Depends(get_user_id),   # ← Auth required
+):
     """
-    Uploaded PDF ko process karo:
-    1. Local temp file se text extract karo
-    2. Chunk + embed + pgvector mein store karo
-    3. Supabase documents table update karo
-    """
-    doc_id   = request.doc_id
-    pdf_path = os.path.join(UPLOAD_DIR, f"{doc_id}.pdf")
+    PDF process karo — chunk + embed + pgvector store.
 
-    # ── File check ────────────────────────────────────────────────────────────
+    Ownership verify karta hai:
+    - Document exist karta hai DB mein?
+    - Is user ka hai?
+    """
+    doc_id = request.doc_id
+
+    # Ownership verify karo — sirf owner ingest kar sakta hai
+    doc = get_document_by_id(doc_id, user_id)
+    if not doc:
+        raise HTTPException(
+            status_code=404,
+            detail="Document nahi mila ya aapka nahi hai."
+        )
+
+    pdf_path = os.path.join(UPLOAD_DIR, f"{doc_id}.pdf")
     if not os.path.exists(pdf_path):
         raise HTTPException(
             status_code=404,
-            detail=f"PDF nahi mili '{doc_id}'. Pehle /upload/ karein."
+            detail="PDF file locally nahi mili. Dobara upload karein."
         )
 
-    # ── Duplicate check ───────────────────────────────────────────────────────
     if document_exists(doc_id):
         raise HTTPException(
             status_code=409,
-            detail=f"Document '{doc_id}' pehle se ingest ho chuka hai."
+            detail="Document pehle se process ho chuka hai."
         )
 
-    # ── Extract text ──────────────────────────────────────────────────────────
     try:
         pages_data = extract_text_from_pdf(pdf_path)
     except Exception as e:
@@ -52,26 +62,24 @@ async def ingest_pdf(request: IngestRequest):
     if not pages_data:
         raise HTTPException(
             status_code=422,
-            detail="PDF mein readable text nahi mila. Scanned PDF hai?"
+            detail="PDF mein readable text nahi mila. Scanned hai?"
         )
 
-    # ── Chunk + embed + store in pgvector ────────────────────────────────────
     try:
         result = ingest_document(doc_id, pages_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingest error: {str(e)}")
 
-    # ── Update Supabase documents table ───────────────────────────────────────
     try:
         update_document_after_ingest(
             doc_id=doc_id,
             total_chunks=result["total_chunks"],
             doc_type=result["doc_type"],
             chunk_size=result["chunk_size_used"],
+            user_id=user_id,
         )
     except Exception as e:
-        # Non-fatal — embeddings stored, DB update fail
-        print(f"Warning: DB update failed for {doc_id}: {e}")
+        print(f"Warning: DB update failed: {e}")
 
     return {
         "success":           True,
@@ -82,23 +90,22 @@ async def ingest_pdf(request: IngestRequest):
         "chunk_size_used":   result["chunk_size_used"],
         "document_stats":    result["stats"],
         "message":           result["message"],
-        "next_step":         f"Ab /chat/ use karo doc_id='{doc_id}' ke saath"
     }
 
 
 @router.get("/status/{doc_id}")
-async def check_ingest_status(doc_id: str):
+async def check_ingest_status(
+    doc_id: str,
+    user_id: str = Depends(get_user_id),
+):
     """Document ingest status check karo."""
-    pdf_exists  = os.path.exists(os.path.join(UPLOAD_DIR, f"{doc_id}.pdf"))
+    doc         = get_document_by_id(doc_id, user_id)
     is_ingested = document_exists(doc_id)
 
-    # DB se bhi info lo
-    db_record = get_document_by_id(doc_id)
-
     return {
-        "doc_id":              doc_id,
-        "pdf_locally_cached":  pdf_exists,
+        "doc_id":               doc_id,
+        "exists_in_db":         doc is not None,
         "ingested_in_pgvector": is_ingested,
-        "ready_for_chat":      is_ingested,
-        "db_record":           db_record,
+        "ready_for_chat":       is_ingested,
+        "db_record":            doc,
     }
