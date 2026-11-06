@@ -1,30 +1,52 @@
 /**
  * AuthContext — global auth state.
  *
- * Auth is handled by the backend (/auth/signup, /auth/login). The JWT and
- * the user object are kept in localStorage so a page refresh keeps you
- * logged in. useAuth() returns { user, token, loading, signUp, signIn, signOut }.
+ * Auth is handled by the backend (/auth/signup, /auth/login).
+ * Token storage uses localStorage → sessionStorage → in-memory fallback,
+ * matching the same chain used in api.js, so the token is always available
+ * for the Authorization header even when localStorage is blocked.
  */
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { signup as apiSignup, login as apiLogin, setToken, clearToken } from '../services/api'
+import { signup as apiSignup, login as apiLogin, setToken, clearToken, getToken } from '../services/api'
 
 const USER_KEY = 'documind_user'
 
+// ─── User storage helpers (localStorage → sessionStorage → no-op) ─────────────
+function loadUser() {
+  let raw = null
+  try { raw = localStorage.getItem(USER_KEY) }   catch { /* blocked */ }
+  if (!raw) try { raw = sessionStorage.getItem(USER_KEY) } catch { /* blocked */ }
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch { return null }
+}
+
+function saveUser(user) {
+  const str = JSON.stringify(user)
+  try { localStorage.setItem(USER_KEY, str); return } catch { /* blocked */ }
+  try { sessionStorage.setItem(USER_KEY, str) }       catch { /* blocked */ }
+}
+
+function removeUser() {
+  try { localStorage.removeItem(USER_KEY) }   catch { /* blocked */ }
+  try { sessionStorage.removeItem(USER_KEY) } catch { /* blocked */ }
+}
+
+// ─── Context ──────────────────────────────────────────────────────────────────
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [token, setTokenState] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser]         = useState(null)
+  const [token, setTokenState]  = useState(null)
+  const [loading, setLoading]   = useState(true)
 
-  // Restore session from localStorage on mount
+  // Restore session on mount
   useEffect(() => {
-    const savedToken = localStorage.getItem('documind_token')
-    const savedUser = localStorage.getItem(USER_KEY)
+    const savedToken = getToken()
+    const savedUser  = loadUser()
     if (savedToken && savedUser) {
       setTokenState(savedToken)
-      try { setUser(JSON.parse(savedUser)) } catch { setUser(null) }
+      setUser(savedUser)
     }
     setLoading(false)
   }, [])
@@ -43,7 +65,7 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     clearToken()
-    localStorage.removeItem(USER_KEY)
+    removeUser()
     setTokenState(null)
     setUser(null)
   }
@@ -52,7 +74,7 @@ export function AuthProvider({ children }) {
     setToken(data.token)
     setTokenState(data.token)
     setUser(data.user)
-    localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+    saveUser(data.user)
   }
 
   const value = { user, token, loading, signUp, signIn, signOut }

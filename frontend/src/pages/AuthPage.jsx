@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mail, Lock, Eye, EyeOff, AlertCircle, FileText } from 'lucide-react'
+import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import AuroraBackground from '../components/AuroraBackground'
 import GlassCard from '../components/GlassCard'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -77,14 +77,6 @@ export default function AuthPage() {
           animate={{ opacity: 1, y: 0 }}
           style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 40 }}
         >
-          <div style={{
-            width: 38, height: 38, borderRadius: 11,
-            background: 'linear-gradient(135deg, var(--accent), #5b4fcf)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 0 20px var(--accent-glow)',
-          }}>
-            <FileText size={19} color="white" strokeWidth={2} />
-          </div>
           <span style={{
             fontFamily: 'var(--font-display)',
             fontWeight: 700,

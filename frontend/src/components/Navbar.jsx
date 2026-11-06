@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { FileText, LogOut, ChevronDown, User } from 'lucide-react'
+import { LogOut, ChevronDown } from 'lucide-react'
 import { checkHealth } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -58,14 +58,6 @@ export default function Navbar() {
         whileHover={!isHome ? { scale: 1.03 } : {}}
         whileTap={!isHome   ? { scale: 0.97 } : {}}
       >
-        <div style={{
-          width: 32, height: 32, borderRadius: 10,
-          background: 'linear-gradient(135deg, var(--accent), #5b4fcf)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 0 14px var(--accent-glow)', flexShrink: 0,
-        }}>
-          <FileText size={16} color="white" strokeWidth={2} />
-        </div>
         <span style={{
           fontFamily: 'var(--font-display)', fontWeight: 700,
           fontSize: '1.05rem', letterSpacing: '-0.02em', color: 'var(--text-primary)',

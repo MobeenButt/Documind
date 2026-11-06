@@ -1,25 +1,40 @@
 /**
  * api.js — Frontend ↔ Backend HTTP layer.
  *
- * Auth tokens are stored in localStorage and sent as a Bearer header on
- * every protected request.
+ * Token storage uses localStorage with sessionStorage as a fallback,
+ * and finally an in-memory variable if both are blocked (e.g. iframe).
  */
 
 const TOKEN_KEY = 'documind_token'
 
 export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-function getToken() {
-  return localStorage.getItem(TOKEN_KEY)
+// ─── Token storage (localStorage → sessionStorage → memory) ───────────────────
+let _memToken = null   // last-resort in-memory fallback
+
+export function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) } catch { /* blocked */ }
+  try { return sessionStorage.getItem(TOKEN_KEY) } catch { /* blocked */ }
+  return _memToken
 }
 
 export function setToken(token) {
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
+  _memToken = token || null
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else        localStorage.removeItem(TOKEN_KEY)
+    return
+  } catch { /* blocked */ }
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token)
+    else        sessionStorage.removeItem(TOKEN_KEY)
+  } catch { /* blocked — in-memory only */ }
 }
 
 export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY)
+  _memToken = null
+  try { localStorage.removeItem(TOKEN_KEY) }   catch { /* blocked */ }
+  try { sessionStorage.removeItem(TOKEN_KEY) } catch { /* blocked */ }
 }
 
 async function request(path, options = {}, requireAuth = true) {
