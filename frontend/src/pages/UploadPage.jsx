@@ -548,13 +548,9 @@ export default function UploadPage() {
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
             style={{ display: 'flex', gap: 10, marginTop: 24, flexWrap: 'wrap', justifyContent: 'center' }}
           >
-            {[
-              { icon: '⚡', text: 'Instant answers' },
-              { icon: '📄', text: 'Page citations' },
-              { icon: '☁️', text: 'Cloud storage' },
-            ].map(p => (
-              <div key={p.text} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                <span>{p.icon}</span>{p.text}
+            {['Instant answers', 'Page citations', 'Secure & private'].map(text => (
+              <div key={text} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                {text}
               </div>
             ))}
           </motion.div>

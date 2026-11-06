@@ -1,37 +1,35 @@
 /**
- * api.js — Frontend ↔ Backend HTTP layer
+ * api.js — Frontend ↔ Backend HTTP layer.
  *
- * Authentication kaise bhejte hain?
- * Har protected request ke saath Authorization header bhejte hain:
- *   Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...
- *
- * Token Supabase session se aata hai (AuthContext mein available hai).
- * Backend yeh token verify karta hai aur user_id extract karta hai.
+ * Auth tokens are stored in localStorage and sent as a Bearer header on
+ * every protected request.
  */
 
-import { supabase } from '../lib/supabase'
+const TOKEN_KEY = 'documind_token'
 
-const BASE_URL = 'http://localhost:8000'
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// ─── Token getter ──────────────────────────────────────────────────────────────
-// Har request se pehle current session ka token lo.
-// Supabase automatically token refresh karta hai jab expire hone wala ho.
-async function getToken() {
-  const { data: { session } } = await supabase.auth.getSession()
-  return session?.access_token ?? null
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY)
 }
 
-// ─── Base request helper ───────────────────────────────────────────────────────
+export function setToken(token) {
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
 async function request(path, options = {}, requireAuth = true) {
   const headers = { ...options.headers }
 
   if (requireAuth) {
-    const token = await getToken()
+    const token = getToken()
     if (!token) {
-      // Token nahi hai — user logged out ho gaya
-      throw new Error('Not authenticated. Please login.')
+      throw new Error('Not authenticated. Please log in.')
     }
-    // Authorization header add karo
     headers['Authorization'] = `Bearer ${token}`
   }
 
@@ -39,43 +37,58 @@ async function request(path, options = {}, requireAuth = true) {
 
   let data
   try { data = await res.json() }
-  catch { throw new Error(`Server returned non-JSON (${res.status})`) }
+  catch { throw new Error(`Server returned an invalid response (${res.status})`) }
 
   if (!res.ok) {
     const msg = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)
-    throw new Error(msg)
+    throw new Error(msg || 'Request failed.')
   }
 
   return data
 }
 
-// ─── Public endpoints (no auth) ───────────────────────────────────────────────
+// ─── Public ───────────────────────────────────────────────────────────────────
 export async function checkHealth() {
-  return request('/health', {}, false)   // No auth needed
+  return request('/health', {}, false)
 }
 
-// ─── Protected endpoints ──────────────────────────────────────────────────────
+// ─── Auth ──────────────────────────────────────────────────────────────────────
+export async function signup(email, password) {
+  return request('/auth/signup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  }, false)
+}
 
+export async function login(email, password) {
+  return request('/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  }, false)
+}
+
+// ─── Protected ─────────────────────────────────────────────────────────────────
 export async function uploadPDF(file) {
   const formData = new FormData()
   formData.append('file', file)
   return request('/upload/', { method: 'POST', body: formData })
-  // Note: No Content-Type header — browser sets multipart boundary automatically
 }
 
 export async function ingestDocument(doc_id) {
   return request('/ingest/', {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ doc_id }),
+    body: JSON.stringify({ doc_id }),
   })
 }
 
 export async function sendMessage(doc_id, question, n_results = 6) {
   return request('/chat/', {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ doc_id, question, n_results }),
+    body: JSON.stringify({ doc_id, question, n_results }),
   })
 }
 

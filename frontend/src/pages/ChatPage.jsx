@@ -34,23 +34,23 @@ export default function ChatPage() {
     if (!doc_id) navigate('/', { replace: true })
   }, [doc_id, navigate])
 
-  // ── Load chat history from Supabase on mount ──────────────────────────────
+  // ── Load chat history on mount ──────────────────────────────────────────────
   useEffect(() => {
     if (!doc_id) return
 
     async function loadHistory() {
       setLoadingHistory(true)
       try {
-        // Check if document is ingested in pgvector
+        // Check if the document has been ingested
         const status = await checkIngestStatus(doc_id)
-        if (!status.ingested_in_pgvector) {
+        if (!status.ingested) {
           setNotIngested(true)
           setLoadingHistory(false)
           return
         }
 
         const res = await getChatHistory(doc_id)
-        // Map Supabase rows to local message shape
+        // Map rows to local message shape
         const loaded = (res.messages || []).map(row => ({
           id:        row.id,
           role:      row.role,
@@ -227,7 +227,7 @@ export default function ChatPage() {
             {/* Model badge */}
             <div style={{ padding: '7px 11px', borderRadius: 9, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: 6 }}>
               <Sparkles size={10} color="var(--accent)" />
-              Powered by Groq LLM · Supabase
+              Powered by Groq LLM
             </div>
           </motion.aside>
 

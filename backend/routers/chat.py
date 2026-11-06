@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from services.vector_service import query_document, document_exists
 from services.llm_service import generate_answer
-from services.supabase_service import insert_chat_message, get_chat_history
+from services.mongo_service import insert_chat_message, get_chat_history
 from services.auth_service import get_user_id
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -38,10 +38,10 @@ async def chat_with_document(
 ):
     """
     Full RAG pipeline with auth:
-    1. Document user ka hai verify karo
-    2. pgvector se relevant chunks retrieve karo
-    3. Groq LLM se answer generate karo
-    4. Messages user_id ke saath save karo
+    1. Verify the document belongs to the user
+    2. Retrieve relevant chunks from MongoDB
+    3. Generate an answer with the Groq LLM
+    4. Save both messages with the user_id
     """
     doc_id   = request.doc_id
     question = request.question.strip()
@@ -49,7 +49,7 @@ async def chat_with_document(
     if not document_exists(doc_id):
         raise HTTPException(
             status_code=404,
-            detail="Document nahi mila ya process nahi hua."
+            detail="Document not found or not yet processed."
         )
 
     try:
@@ -60,7 +60,7 @@ async def chat_with_document(
     if not relevant_chunks:
         raise HTTPException(
             status_code=404,
-            detail="Is question ke liye relevant content nahi mila."
+            detail="No relevant content found for this question."
         )
 
     try:
@@ -68,7 +68,7 @@ async def chat_with_document(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM error: {str(e)}")
 
-    # Messages save — user_id ke saath
+    # Save both messages with the user_id
     try:
         insert_chat_message(doc_id, "user", question, user_id)
     except Exception as e:
@@ -106,9 +106,7 @@ async def get_document_chat_history(
     doc_id: str,
     user_id: str = Depends(get_user_id),
 ):
-    """
-    Chat history fetch karo — sirf is user ki messages.
-    """
+    """Fetch chat history for this document, restricted to this user."""
     try:
         messages = get_chat_history(doc_id, user_id)
     except Exception as e:

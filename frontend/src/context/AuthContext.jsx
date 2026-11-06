@@ -1,109 +1,68 @@
 /**
- * AuthContext — Global auth state management
+ * AuthContext — global auth state.
  *
- * Concept: React Context kya hai?
- * Normal mein agar parent se child ko data pass karna ho toh props use karte hain:
- *   App → Navbar → UserAvatar (user prop pass karo har jagah)
- *
- * Context se koi bhi component directly user access kar sakta hai:
- *   useAuth() → { user, session, signOut }
- * Koi prop drilling nahi.
- *
- * Supabase Auth kaise kaam karta hai?
- * 1. signUp(email, password) → Supabase user banata hai → confirmation email
- * 2. signIn(email, password) → JWT token milta hai → session mein store hoti hai
- * 3. supabase.auth.onAuthStateChange() → har change pe callback
- *    (login, logout, token refresh — sab automatically handle hota hai)
- * 4. session.access_token → backend ko bhejo har request mein
+ * Auth is handled by the backend (/auth/signup, /auth/login). The JWT and
+ * the user object are kept in localStorage so a page refresh keeps you
+ * logged in. useAuth() returns { user, token, loading, signUp, signIn, signOut }.
  */
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { signup as apiSignup, login as apiLogin, setToken, clearToken } from '../services/api'
 
-// Context object — default value null means "not inside a provider"
+const USER_KEY = 'documind_user'
+
 const AuthContext = createContext(null)
 
-// ─── Provider ────────────────────────────────────────────────────────────────
-// Yeh component poori app ko wrap karta hai (App.jsx mein)
-// Saare child components useAuth() hook se user access kar sakte hain
-
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null)     // Supabase user object
-  const [session, setSession] = useState(null)     // Session (contains JWT token)
-  const [loading, setLoading] = useState(true)     // Initial auth check chal raha hai?
+  const [user, setUser] = useState(null)
+  const [token, setTokenState] = useState(null)
+  const [loading, setLoading] = useState(true)
 
+  // Restore session from localStorage on mount
   useEffect(() => {
-    // ── Step 1: Current session check ──────────────────────────────────────
-    // App load hone pe check karo — kya user pehle se logged in hai?
-    // Supabase localStorage mein session save karta hai
-    // (user page refresh kare toh logout nahi hota)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
-
-    // ── Step 2: Auth state listener ────────────────────────────────────────
-    // Jab bhi auth change ho (login/logout/token refresh) yeh callback chalega
-    // 'SIGNED_IN' event pe session milti hai
-    // 'SIGNED_OUT' event pe session null hoti hai
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
-        setLoading(false)
-      }
-    )
-
-    // Cleanup — component unmount pe listener remove karo
-    return () => subscription.unsubscribe()
+    const savedToken = localStorage.getItem('documind_token')
+    const savedUser = localStorage.getItem(USER_KEY)
+    if (savedToken && savedUser) {
+      setTokenState(savedToken)
+      try { setUser(JSON.parse(savedUser)) } catch { setUser(null) }
+    }
+    setLoading(false)
   }, [])
 
-  // ── Auth functions ────────────────────────────────────────────────────────
-
   async function signUp(email, password) {
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error) throw error
+    const data = await apiSignup(email, password)
+    persist(data)
     return data
   }
 
   async function signIn(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
+    const data = await apiLogin(email, password)
+    persist(data)
     return data
   }
 
   async function signOut() {
-    const { error } = await supabase.auth.signOut()
-    if (error) throw error
+    clearToken()
+    localStorage.removeItem(USER_KEY)
+    setTokenState(null)
+    setUser(null)
   }
 
-  // Value jo saare child components ko milegi
-  const value = {
-    user,        // Supabase user object { id, email, ... }
-    session,     // Session { access_token, ... }
-    loading,     // true jab tak initial check complete na ho
-    signUp,
-    signIn,
-    signOut,
-    // Convenience: JWT token directly
-    // Backend ko har request mein yeh bhejni hoti hai
-    token: session?.access_token ?? null,
+  function persist(data) {
+    setToken(data.token)
+    setTokenState(data.token)
+    setUser(data.user)
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user))
   }
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  )
+  const value = { user, token, loading, signUp, signIn, signOut }
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-// ─── Hook ────────────────────────────────────────────────────────────────────
-// Custom hook — useAuth() likhne se saara context ek line mein milta hai
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {
-    throw new Error('useAuth must be used inside AuthProvider')
+    throw new Error('useAuth must be used inside an AuthProvider')
   }
   return context
 }

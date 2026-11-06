@@ -1,126 +1,89 @@
 """
-auth_service.py — JWT Token Verification
+auth_service.py — JWT auth backed by MongoDB users (HS256).
 
-Concept: Kaise authentication kaam karta hai?
-
-1. User frontend pe login karta hai (email + password)
-2. Supabase ek JWT token return karta hai
-   JWT = JSON Web Token — ek encoded string jisme user ki info hoti hai
-   Example: "eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoiYWJjIn0.xyz"
-
-3. Frontend har API request ke saath yeh token bhejta hai:
-   Header: Authorization: Bearer eyJhbGciOiJ...
-
-4. Backend token verify karta hai:
-   - Valid hai? (tampered nahi hua?)
-   - Expire nahi hua?
-   - Supabase ne issue kiya tha?
-
-5. Token valid hai toh user_id extract karo aur request process karo.
-
-Service Role Key vs JWT:
-- Service role key = backend ka master key (RLS bypass karta hai)
-- JWT = user ka personal token (RLS enforce hoti hai)
-- Humara backend service role se DB operations karta hai
-  lekin user_id JWT se extract karke manually filter lagata hai
+Self-contained auth: user accounts live in MongoDB, passwords are hashed
+with bcrypt, and short-lived JWTs are signed with a shared secret (HS256).
 """
 
 import os
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import bcrypt
 import jwt
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
 
-# HTTPBearer FastAPI ka built-in security scheme hai
-# Yeh Authorization header se "Bearer <token>" extract karta hai
+from services.mongo_service import users_col
+
+JWT_SECRET = os.getenv("JWT_SECRET", "change-this-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXP_HOURS = int(os.getenv("JWT_EXP_HOURS", "72"))
+
 security = HTTPBearer()
 
-# Supabase JWT secret — token verify karne ke liye
-# Supabase Dashboard → Settings → API → JWT Secret
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+
+# ─── Password helpers ──────────────────────────────────────────────────────────
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+# ─── Token helpers ─────────────────────────────────────────────────────────────
+def create_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXP_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> dict:
-    """
-    JWT token verify karo aur user info return karo.
-
-    FastAPI dependency injection se use hota hai:
-        @router.post("/")
-        async def endpoint(user = Depends(verify_token)):
-            user_id = user["sub"]
-
-    "sub" = subject = user ka unique ID (UUID)
-    Yeh Supabase ka standard JWT claim hai.
-    """
-    token = credentials.credentials
-
+    """Decode and verify a Bearer JWT."""
     try:
-        # jwt.decode() token ko verify + decode karta hai
-        # algorithms=["HS256"] — Supabase HS256 algorithm use karta hai
-        # options={"verify_aud": False} — audience check skip karo
-        #   (Supabase ke tokens mein audience "authenticated" hota hai
-        #    lekin hum sirf user_id chahiye, audience verify ki zaroorat nahi)
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_aud": False}
-        )
-        return payload
-
+        return jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
-        # Token ka expiry time guzar gaya — user ko dobara login karna hoga
         raise HTTPException(
             status_code=401,
-            detail="Session expire ho gayi. Dobara login karein."
+            detail="Your session has expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-
-    except jwt.InvalidTokenError as e:
-        # Token tampered hua ya invalid hai
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=401,
-            detail=f"Invalid token: {str(e)}"
+            detail="Invalid authentication token.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 
 def get_user_id(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
-    """
-    Shortcut — sirf user_id string return karo.
-    Most endpoints mein sirf yahi chahiye.
-
-    Usage:
-        @router.post("/")
-        async def endpoint(user_id: str = Depends(get_user_id)):
-            # user_id ready to use
-    """
+    """Extract user_id (sub) from a verified token. Used by protected endpoints."""
     payload = verify_token(credentials)
     user_id = payload.get("sub")
-
     if not user_id:
-        raise HTTPException(
-            status_code=401,
-            detail="Token mein user ID nahi mili."
-        )
-
+        raise HTTPException(status_code=401, detail="Token is missing a user ID.")
     return user_id
 
 
 def get_optional_user_id(
-    credentials: Optional[HTTPAuthorizationCredentials] = Security(HTTPBearer(auto_error=False))
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(
+        HTTPBearer(auto_error=False)
+    ),
 ) -> Optional[str]:
-    """
-    Optional auth — token hai toh verify karo, nahi hai toh None return karo.
-    Public endpoints ke liye jahan auth optional ho.
-    """
+    """Optional auth — no token returns None, a valid token returns user_id."""
     if not credentials:
         return None
     try:
-        payload = jwt.decode(
-            credentials.credentials,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_aud": False}
-        )
-        return payload.get("sub")
+        return jwt.decode(
+            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+        ).get("sub")
     except Exception:
         return None

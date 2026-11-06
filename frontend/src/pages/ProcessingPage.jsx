@@ -39,7 +39,7 @@ const STEPS = [
     id: 'store',
     icon: Database,
     label: 'Storing in vector DB',
-    detail: 'Indexing chunks in ChromaDB',
+    detail: 'Indexing chunks for semantic search',
     color: '#34d399',
   },
 ]
